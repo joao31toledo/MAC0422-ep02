@@ -19,8 +19,8 @@ extern pthread_mutex_t **controle_pista;
 // Struct do ciclista
 typedef struct {
     int id;                         
-    int posicao;                    
-    int faixa;                      
+    int linha_pista;                    
+    int coluna_pista;                      
 
     int velocidade;                
     int velocidade_anterior;      
@@ -40,10 +40,14 @@ extern Ciclista *ciclistas;
 // Funções utilitárias
 void inicializa_pista();
 void inicializa_ciclistas();
+void inicializa_threads_ciclistas();
+void aguarda_threads_ciclistas();
 void sorteia_largada(Ciclista *c);
 void inicializa_mutexes();
 void libera_pista();
 void libera_mutexes();
 void imprime_pista();
+void *logica_cilista(void *arg);
+
 
 #endif

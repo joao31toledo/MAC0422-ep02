@@ -19,12 +19,12 @@ pthread_mutex_t **controle_pista = NULL;
 
 void inicializa_pista()
 {
-    pista = malloc(sizeof(int *) * d);
+    pista = malloc(sizeof(int *) * N_FAIXAS);
 
-    for (int i = 0; i < d; i++)
+    for (int i = 0; i < N_FAIXAS; i++)
     {
-        pista[i] = malloc(sizeof(int) * N_FAIXAS);
-        for (int j = 0; j < N_FAIXAS; j++)
+        pista[i] = malloc(sizeof(int) * d);
+        for (int j = 0; j < d; j++)
         {
             pista[i][j] = -1;
         }
@@ -33,27 +33,25 @@ void inicializa_pista()
 
 void inicializa_mutexes() {
     if (modo == 'i') {
-        // Modo ingênuo: um único mutex
         if (pthread_mutex_init(&pista_mutex, NULL) != 0) {
             perror("Erro ao inicializar mutex global");
             exit(EXIT_FAILURE);
         }
     } else if (modo == 'e') {
-        // Modo eficiente: aloca matriz de mutexes
-        controle_pista = malloc(d * sizeof(pthread_mutex_t *));
+        controle_pista = malloc(N_FAIXAS * sizeof(pthread_mutex_t *));
         if (!controle_pista) {
             perror("Erro ao alocar controle_pista");
             exit(EXIT_FAILURE);
         }
 
-        for (int i = 0; i < d; i++) {
-            controle_pista[i] = malloc(N_FAIXAS * sizeof(pthread_mutex_t));
+        for (int i = 0; i < N_FAIXAS; i++) {
+            controle_pista[i] = malloc(d * sizeof(pthread_mutex_t));
             if (!controle_pista[i]) {
                 perror("Erro ao alocar linha de mutexes");
                 exit(EXIT_FAILURE);
             }
 
-            for (int j = 0; j < N_FAIXAS; j++) {
+            for (int j = 0; j < d; j++) {
                 if (pthread_mutex_init(&controle_pista[i][j], NULL) != 0) {
                     perror("Erro ao inicializar mutex individual");
                     exit(EXIT_FAILURE);
@@ -65,6 +63,7 @@ void inicializa_mutexes() {
         exit(EXIT_FAILURE);
     }
 }
+
 
 void inicializa_ciclistas()
 {
@@ -80,46 +79,68 @@ void inicializa_ciclistas()
         ciclistas[i].eliminado = 0;
 
         pthread_mutex_init(&ciclistas[i].mutex, NULL);
-
+        
         // 🎯 Sorteia posição de largada livre na pista
         sorteia_largada(&ciclistas[i]);
     }
 }
 
+
+void *logica_ciclista(void *arg) {
+    Ciclista *c = (Ciclista *)arg;
+    printf("Thread do ciclista %d\n", c->id);
+    printf("\t %d está na posição [%d][%d] (faixa, posição)\n", c->id, c->linha_pista, c->coluna_pista);
+    pthread_exit(NULL);
+}
+
+
+
+void inicializa_threads_ciclistas() {
+    // cria uma thread para cada um dos ciclistas
+    for (int i = 0; i < k; i++) {
+        pthread_create(&ciclistas[i].thread, NULL, logica_ciclista, &ciclistas[i]);
+    }
+}
+
+void aguarda_threads_ciclistas() {
+    for (int i = 0; i < k; i++) {
+        pthread_join(ciclistas[i].thread, NULL);
+    }
+}
+
 void sorteia_largada(Ciclista *c)
 {
-    int pos, faixa;
+    int lin, col;
     int achou_lugar = 0;
 
     while (!achou_lugar) {
-        pos = rand() % d;
-        faixa = rand() % N_FAIXAS;
+        lin = rand() % N_FAIXAS;
+        col = rand() % d;
 
         if (modo == 'i') {
             pthread_mutex_lock(&pista_mutex);
-            if (pista[pos][faixa] == -1) {
-                pista[pos][faixa] = c->id;
+            if (pista[lin][col] == -1) {
+                pista[lin][col] = c->id;
                 achou_lugar = 1;
             }
             pthread_mutex_unlock(&pista_mutex);
         } else {
-            pthread_mutex_lock(&controle_pista[pos][faixa]);
-            if (pista[pos][faixa] == -1) {
-                pista[pos][faixa] = c->id;
+            pthread_mutex_lock(&controle_pista[lin][col]);
+            if (pista[lin][col] == -1) {
+                pista[lin][col] = c->id;
                 achou_lugar = 1;
             }
-            pthread_mutex_unlock(&controle_pista[pos][faixa]);
+            pthread_mutex_unlock(&controle_pista[lin][col]);
         }
     }
 
-    // Registra no ciclista a posição definida
-    c->posicao = pos;
-    c->faixa = faixa;
+    c->linha_pista = lin;
+    c->coluna_pista = col;
 }
 
 void libera_pista() {
     if (pista) {
-        for (int i = 0; i < d; i++) {
+        for (int i = 0; i < N_FAIXAS; i++) {
             free(pista[i]);
         }
         free(pista);
@@ -131,8 +152,8 @@ void libera_mutexes() {
     if (modo == 'i') {
         pthread_mutex_destroy(&pista_mutex);
     } else if (modo == 'e' && controle_pista) {
-        for (int i = 0; i < d; i++) {
-            for (int j = 0; j < N_FAIXAS; j++) {
+        for (int i = 0; i < N_FAIXAS; i++) {
+            for (int j = 0; j < d; j++) {
                 pthread_mutex_destroy(&controle_pista[i][j]);
             }
             free(controle_pista[i]);
@@ -142,8 +163,9 @@ void libera_mutexes() {
     }
 }
 
+
 void imprime_pista() {
-    fprintf(stderr, "\nEstado atual da pista:\n");
+    fprintf(stderr, "\nEstado atual da pista (faixa x posição):\n");
 
     if (modo == 'i') {
         pthread_mutex_lock(&pista_mutex);
@@ -152,7 +174,7 @@ void imprime_pista() {
     for (int faixa = 0; faixa < N_FAIXAS; faixa++) {
         fprintf(stderr, "Faixa %2d: ", faixa);
         for (int pos = 0; pos < d; pos++) {
-            int id = pista[pos][faixa]; // leitura SEM lock no modo 'e'
+            int id = pista[faixa][pos];
             if (id == -1) {
                 fprintf(stderr, ". ");
             } else {
@@ -170,6 +192,7 @@ void imprime_pista() {
 }
 
 
+
 int main(int argc, char *argv[]) {
 
     d = atoi(argv[1]); // tamanho da pista
@@ -185,6 +208,8 @@ int main(int argc, char *argv[]) {
 
     srand(time(NULL));
     inicializa_ciclistas();
+    inicializa_threads_ciclistas();
+    aguarda_threads_ciclistas();
     imprime_pista();
     // inicializa_mutexes();
 
