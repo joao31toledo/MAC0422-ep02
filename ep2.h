@@ -19,8 +19,8 @@ extern pthread_mutex_t **controle_pista;
 // Struct do ciclista
 typedef struct {
     int id;                         
-    int posicao;                    
-    int faixa;                      
+    int linha_pista;                    
+    int coluna_pista;                      
 
     int velocidade;                
     int velocidade_anterior;      
