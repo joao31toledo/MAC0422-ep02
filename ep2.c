@@ -142,7 +142,7 @@ void libera_mutexes() {
     }
 }
 
-void imprime_debug_da_pista() {
+void imprime_pista() {
     fprintf(stderr, "\nEstado atual da pista:\n");
 
     if (modo == 'i') {
@@ -185,7 +185,7 @@ int main(int argc, char *argv[]) {
 
     srand(time(NULL));
     inicializa_ciclistas();
-    imprime_debug_da_pista();
+    imprime_pista();
     // inicializa_mutexes();
 
     printf("✅ Pista de %d metros criada com sucesso!\n", d);

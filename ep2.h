@@ -44,6 +44,6 @@ void sorteia_largada(Ciclista *c);
 void inicializa_mutexes();
 void libera_pista();
 void libera_mutexes();
-void imprime_debug_da_pista();
+void imprime_pista();
 
 #endif
