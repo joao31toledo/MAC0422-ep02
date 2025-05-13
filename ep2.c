@@ -80,11 +80,33 @@ void inicializa_ciclistas()
         ciclistas[i].eliminado = 0;
 
         pthread_mutex_init(&ciclistas[i].mutex, NULL);
-
+        
         // 🎯 Sorteia posição de largada livre na pista
         sorteia_largada(&ciclistas[i]);
     }
 }
+
+
+void *logica_ciclista(void *arg) {
+    Ciclista *c = (Ciclista *)arg;
+    printf("Thread do ciclista %d\n", c->id);
+    pthread_exit(NULL);
+}
+
+
+void inicializa_threads_ciclistas() {
+    // cria uma thread para cada um dos ciclistas
+    for (int i = 0; i < k; i++) {
+        pthread_create(&ciclistas[i].thread, NULL, logica_ciclista, &ciclistas[i]);
+    }
+}
+
+void aguarda_threads_ciclistas() {
+    for (int i = 0; i < k; i++) {
+        pthread_join(ciclistas[i].thread, NULL);
+    }
+}
+
 
 void sorteia_largada(Ciclista *c)
 {
@@ -185,6 +207,8 @@ int main(int argc, char *argv[]) {
 
     srand(time(NULL));
     inicializa_ciclistas();
+    inicializa_threads_ciclistas();
+    aguarda_threads_ciclistas();
     imprime_pista();
     // inicializa_mutexes();
 
