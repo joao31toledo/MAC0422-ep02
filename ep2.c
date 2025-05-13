@@ -89,7 +89,7 @@ void inicializa_ciclistas()
 void *logica_ciclista(void *arg) {
     Ciclista *c = (Ciclista *)arg;
     printf("Thread do ciclista %d\n", c->id);
-    printf("\t está na posição [%d][%d] (faixa, posição)\n", c->linha_pista, c->coluna_pista);
+    printf("\t %d está na posição [%d][%d] (faixa, posição)\n", c->id, c->linha_pista, c->coluna_pista);
     pthread_exit(NULL);
 }
 
