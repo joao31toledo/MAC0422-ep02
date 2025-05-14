@@ -109,6 +109,22 @@ void *logica_ciclista(void *arg) {
 
         printf("🚴 Ciclista %d executando tick %d\n", c->id, tick);
 
+        if (c->ticks_para_mover > 0) {
+            c->ticks_para_mover--;
+            if (debug) {
+                printf("\t⏳ Ciclista %d aguardando, ticks restantes: %d\n", c->id, c->ticks_para_mover);
+            }
+        } else {
+            if (debug) {
+                printf("\t✅ Ciclista %d pode mover nesse tick\n", c->id);
+            }
+        
+            // Recarrega tempo para o próximo movimento
+            c->ticks_para_mover = (c->velocidade == 30) ? 2 : 1;
+        }
+        
+
+
         pthread_mutex_lock(&tick_mutexes[id]);
         arrive[id] = 1;
         pthread_cond_signal(&tick_conds[id]);
@@ -177,8 +193,7 @@ void inicializa_sincronizacao() {
 }
 
 void *coordenador_tick(void *arg) {
-
-    // 🔓 Libera o primeiro tick antes de começar a esperar
+    // 🔓 Libera o primeiro tick antes de esperar qualquer coisa
     for (int i = 0; i < k; i++) {
         pthread_mutex_lock(&tick_mutexes[i]);
         continue_flag[i] = 1;
@@ -186,21 +201,24 @@ void *coordenador_tick(void *arg) {
         pthread_mutex_unlock(&tick_mutexes[i]);
     }
 
+    // Loop de ticks
     for (int tick = 0; tick < 10; tick++) {
         printf("\n⏱️ Coordenador aguardando tick %d...\n", tick);
 
+        // Espera todos os ciclistas chegarem no tick
         for (int i = 0; i < k; i++) {
             pthread_mutex_lock(&tick_mutexes[i]);
-            while (arrive[i] == 0) {
+            while (!arrive[i]) {
                 pthread_cond_wait(&tick_conds[i], &tick_mutexes[i]);
             }
-            // já está com mutex travado, pode resetar
-            arrive[i] = 0;
+            arrive[i] = 0; // limpa para o próximo tick
             pthread_mutex_unlock(&tick_mutexes[i]);
         }
 
-        printf("🟢 Tick %d finalizado. Liberando próximo tick...\n", tick);
+        // Todos os ciclistas chegaram
+        printf("🟢 Tick %d finalizado. Liberando próximo tick...\n", tick + 1);
 
+        // Libera todos os ciclistas para o próximo tick
         for (int i = 0; i < k; i++) {
             pthread_mutex_lock(&tick_mutexes[i]);
             continue_flag[i] = 1;
@@ -211,6 +229,7 @@ void *coordenador_tick(void *arg) {
 
     pthread_exit(NULL);
 }
+
 
 
 void libera_pista() {
