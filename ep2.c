@@ -17,6 +17,12 @@ Ciclista *ciclistas = NULL;
 pthread_mutex_t pista_mutex;
 pthread_mutex_t **controle_pista = NULL;
 
+// Sincronização por tick
+int *arrive;
+int *continue_flag;
+pthread_mutex_t *tick_mutexes;
+pthread_cond_t *tick_conds;
+
 void inicializa_pista()
 {
     pista = malloc(sizeof(int *) * N_FAIXAS);
@@ -88,12 +94,30 @@ void inicializa_ciclistas()
 
 void *logica_ciclista(void *arg) {
     Ciclista *c = (Ciclista *)arg;
-    printf("Thread do ciclista %d\n", c->id);
-    printf("\t %d está na posição [%d][%d] (faixa, posição)\n", c->id, c->linha_pista, c->coluna_pista);
+    int id = c->id - 1;
+
+    for (int tick = 0; tick < 10; tick++) {
+        printf("🟡 Ciclista %d pronto para o tick %d\n", c->id, tick);
+
+        pthread_mutex_lock(&tick_mutexes[id]);
+        while (!continue_flag[id]) {
+            printf("⏸️ Ciclista %d esperando coordenador (tick %d)\n", c->id, tick);
+            pthread_cond_wait(&tick_conds[id], &tick_mutexes[id]);
+        }
+        continue_flag[id] = 0;
+        pthread_mutex_unlock(&tick_mutexes[id]);
+
+        printf("🚴 Ciclista %d executando tick %d\n", c->id, tick);
+
+        pthread_mutex_lock(&tick_mutexes[id]);
+        arrive[id] = 1;
+        pthread_cond_signal(&tick_conds[id]);
+        pthread_mutex_unlock(&tick_mutexes[id]);
+    }
+
+    printf("🏁 Ciclista %d finalizou a simulação.\n", c->id);
     pthread_exit(NULL);
 }
-
-
 
 void inicializa_threads_ciclistas() {
     // cria uma thread para cada um dos ciclistas
@@ -137,6 +161,57 @@ void sorteia_largada(Ciclista *c)
     c->linha_pista = lin;
     c->coluna_pista = col;
 }
+
+void inicializa_sincronizacao() {
+    arrive = malloc(sizeof(int) * k);
+    continue_flag = malloc(sizeof(int) * k);
+    tick_mutexes = malloc(sizeof(pthread_mutex_t) * k);
+    tick_conds = malloc(sizeof(pthread_cond_t) * k);
+
+    for (int i = 0; i < k; i++) {
+        arrive[i] = 0;
+        continue_flag[i] = 0;
+        pthread_mutex_init(&tick_mutexes[i], NULL);
+        pthread_cond_init(&tick_conds[i], NULL);
+    }
+}
+
+void *coordenador_tick(void *arg) {
+
+    // 🔓 Libera o primeiro tick antes de começar a esperar
+    for (int i = 0; i < k; i++) {
+        pthread_mutex_lock(&tick_mutexes[i]);
+        continue_flag[i] = 1;
+        pthread_cond_signal(&tick_conds[i]);
+        pthread_mutex_unlock(&tick_mutexes[i]);
+    }
+
+    for (int tick = 0; tick < 10; tick++) {
+        printf("\n⏱️ Coordenador aguardando tick %d...\n", tick);
+
+        for (int i = 0; i < k; i++) {
+            pthread_mutex_lock(&tick_mutexes[i]);
+            while (arrive[i] == 0) {
+                pthread_cond_wait(&tick_conds[i], &tick_mutexes[i]);
+            }
+            // já está com mutex travado, pode resetar
+            arrive[i] = 0;
+            pthread_mutex_unlock(&tick_mutexes[i]);
+        }
+
+        printf("🟢 Tick %d finalizado. Liberando próximo tick...\n", tick);
+
+        for (int i = 0; i < k; i++) {
+            pthread_mutex_lock(&tick_mutexes[i]);
+            continue_flag[i] = 1;
+            pthread_cond_signal(&tick_conds[i]);
+            pthread_mutex_unlock(&tick_mutexes[i]);
+        }
+    }
+
+    pthread_exit(NULL);
+}
+
 
 void libera_pista() {
     if (pista) {
@@ -206,9 +281,17 @@ int main(int argc, char *argv[]) {
     inicializa_pista();
     inicializa_mutexes();
 
+    
     srand(time(NULL));
     inicializa_ciclistas();
+    inicializa_sincronizacao();
+
     inicializa_threads_ciclistas();
+    
+    pthread_t coordenador;
+    pthread_create(&coordenador, NULL, coordenador_tick, NULL);
+    pthread_join(coordenador, NULL);
+
     aguarda_threads_ciclistas();
     imprime_pista();
     // inicializa_mutexes();
@@ -223,6 +306,17 @@ int main(int argc, char *argv[]) {
 
     libera_mutexes();
     libera_pista();
+
+    for (int i = 0; i < k; i++) {
+        pthread_mutex_destroy(&tick_mutexes[i]);
+        pthread_cond_destroy(&tick_conds[i]);
+    }
+    free(arrive);
+    free(continue_flag);
+    free(tick_mutexes);
+    free(tick_conds);
+    
+
     free(ciclistas);
     
     return 0;
