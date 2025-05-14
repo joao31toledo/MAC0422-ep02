@@ -91,6 +91,34 @@ void inicializa_ciclistas()
     }
 }
 
+int verifica_frente(Ciclista *c) {
+    int linha = c->linha_pista;
+    int col_atual = c->coluna_pista;
+    int col_prox = (col_atual + 1) % d;
+    int id_na_frente;
+
+    if (modo == 'i') {
+        pthread_mutex_lock(&pista_mutex);
+        id_na_frente = pista[linha][col_prox];
+        pthread_mutex_unlock(&pista_mutex);
+    } else {
+        pthread_mutex_lock(&controle_pista[linha][col_prox]);
+        id_na_frente = pista[linha][col_prox];
+        pthread_mutex_unlock(&controle_pista[linha][col_prox]);
+    }
+
+    if (debug) {
+        if (id_na_frente == -1) {
+            printf("\t 🟢 Frente livre para o ciclista %d\n", c->id);
+        } else {
+            printf("\t 🔴 Frente ocupada para o ciclista %d por ciclista %d\n", c->id, id_na_frente);
+        }
+    }
+
+    return id_na_frente;
+}
+
+
 
 void *logica_ciclista(void *arg) {
     Ciclista *c = (Ciclista *)arg;
@@ -117,8 +145,9 @@ void *logica_ciclista(void *arg) {
         } else {
             if (debug) {
                 printf("\t✅ Ciclista %d pode mover nesse tick\n", c->id);
+                verifica_frente(c);
             }
-        
+            
             // Recarrega tempo para o próximo movimento
             c->ticks_para_mover = (c->velocidade == 30) ? 2 : 1;
         }
@@ -229,6 +258,7 @@ void *coordenador_tick(void *arg) {
 
     pthread_exit(NULL);
 }
+
 
 
 
