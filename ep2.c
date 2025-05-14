@@ -118,6 +118,86 @@ int verifica_frente(Ciclista *c) {
     return id_na_frente;
 }
 
+void verifica_volta_completada(Ciclista *c, int col_antiga, int col_nova) {
+    if (col_nova == 0 && col_antiga == d - 1) {
+        c->voltas_completadas++;
+        if (debug) {
+            printf("🔁 Ciclista %d completou %d volta(s)\n",
+                   c->id, c->voltas_completadas);
+        }
+    }
+}
+
+
+int tenta_mover_para_frente(Ciclista *c) {
+    int linha = c->linha_pista;
+    int col_atual = c->coluna_pista;
+    int col_prox = (col_atual + 1) % d;
+    int moveu = 0;
+
+    if (modo == 'i') {
+        pthread_mutex_lock(&pista_mutex);
+
+        if (pista[linha][col_prox] == -1) {
+            // Atualiza pista
+            pista[linha][col_atual] = -1;
+            pista[linha][col_prox] = c->id;
+
+            // Atualiza posição na struct
+            c->coluna_pista = col_prox;
+
+            // Reseta ticks para mover de novo
+            c->ticks_para_mover = (c->velocidade == 30) ? 2 : 1;
+
+            if (debug) {
+                printf("🏃 Ciclista %d andou de [%d][%d] para [%d][%d]\n",
+                       c->id, linha, col_atual, linha, col_prox);
+            }
+
+            moveu = 1;
+        } else {
+            if (debug) {
+                printf("⛔ Ciclista %d bloqueado em [%d][%d], ocupado por %d\n",
+                       c->id, linha, col_prox, pista[linha][col_prox]);
+            }
+        }
+
+        pthread_mutex_unlock(&pista_mutex);
+
+    } else {
+        // Modo eficiente: tranca duas posições
+        pthread_mutex_lock(&controle_pista[linha][col_atual]);
+        pthread_mutex_lock(&controle_pista[linha][col_prox]);
+
+        if (pista[linha][col_prox] == -1) {
+            pista[linha][col_atual] = -1;
+            pista[linha][col_prox] = c->id;
+
+            int col_antiga = c->coluna_pista;
+            c->coluna_pista = col_prox;
+            verifica_volta_completada(c, col_antiga, col_prox);
+            c->ticks_para_mover = (c->velocidade == 30) ? 2 : 1;
+
+            if (debug) {
+                printf("🏃 Ciclista %d andou de [%d][%d] para [%d][%d]\n",
+                       c->id, linha, col_atual, linha, col_prox);
+            }
+
+            moveu = 1;
+        } else {
+            if (debug) {
+                printf("⛔ Ciclista %d bloqueado em [%d][%d], ocupado por %d\n",
+                       c->id, linha, col_prox, pista[linha][col_prox]);
+            }
+        }
+
+        pthread_mutex_unlock(&controle_pista[linha][col_prox]);
+        pthread_mutex_unlock(&controle_pista[linha][col_atual]);
+    }
+
+    return moveu;
+}
+
 
 
 void *logica_ciclista(void *arg) {
@@ -125,11 +205,11 @@ void *logica_ciclista(void *arg) {
     int id = c->id - 1;
 
     for (int tick = 0; tick < 10; tick++) {
-        printf("🟡 Ciclista %d pronto para o tick %d\n", c->id, tick);
+        //printf("🟡 Ciclista %d pronto para o tick %d\n", c->id, tick);
 
         pthread_mutex_lock(&tick_mutexes[id]);
         while (!continue_flag[id]) {
-            printf("⏸️ Ciclista %d esperando coordenador (tick %d)\n", c->id, tick);
+            //printf("⏸️ Ciclista %d esperando coordenador (tick %d)\n", c->id, tick);
             pthread_cond_wait(&tick_conds[id], &tick_mutexes[id]);
         }
         continue_flag[id] = 0;
@@ -140,16 +220,17 @@ void *logica_ciclista(void *arg) {
         if (c->ticks_para_mover > 0) {
             c->ticks_para_mover--;
             if (debug) {
-                printf("\t⏳ Ciclista %d aguardando, ticks restantes: %d\n", c->id, c->ticks_para_mover);
+                //printf("\t⏳ Ciclista %d aguardando, ticks restantes: %d\n", c->id, c->ticks_para_mover);
             }
         } else {
             if (debug) {
-                printf("\t✅ Ciclista %d pode mover nesse tick\n", c->id);
+                //printf("\t✅ Ciclista %d pode mover nesse tick\n", c->id);
                 verifica_frente(c);
+                tenta_mover_para_frente(c);            
+                // Recarrega tempo para o próximo movimento
+                c->ticks_para_mover = (c->velocidade == 30) ? 2 : 1;
             }
-            
-            // Recarrega tempo para o próximo movimento
-            c->ticks_para_mover = (c->velocidade == 30) ? 2 : 1;
+
         }
         
 
@@ -232,7 +313,7 @@ void *coordenador_tick(void *arg) {
 
     // Loop de ticks
     for (int tick = 0; tick < 10; tick++) {
-        printf("\n⏱️ Coordenador aguardando tick %d...\n", tick);
+        //printf("\n⏱️ Coordenador aguardando tick %d...\n", tick);
 
         // Espera todos os ciclistas chegarem no tick
         for (int i = 0; i < k; i++) {
@@ -343,15 +424,6 @@ int main(int argc, char *argv[]) {
 
     aguarda_threads_ciclistas();
     imprime_pista();
-    // inicializa_mutexes();
-
-    printf("✅ Pista de %d metros criada com sucesso!\n", d);
-    printf("🚴‍♂️ %d ciclistas configurados.\n", k);
-    printf("🔒 Controle de pista: %s\n", (modo == 'i') ? "INGÊNUO (mutex único)" : "EFICIENTE (mutex por célula)");
-
-    if (debug) {
-        fprintf(stderr, "🛠️  Modo DEBUG ativado!\n");
-    }
 
     libera_mutexes();
     libera_pista();
@@ -360,6 +432,7 @@ int main(int argc, char *argv[]) {
         pthread_mutex_destroy(&tick_mutexes[i]);
         pthread_cond_destroy(&tick_conds[i]);
     }
+
     free(arrive);
     free(continue_flag);
     free(tick_mutexes);
