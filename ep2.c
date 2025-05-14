@@ -11,6 +11,7 @@ int d;
 int k;
 char modo;
 int debug = 0;
+int MAX_TICKS = 100;
 
 int **pista = NULL;
 Ciclista *ciclistas = NULL;
@@ -109,9 +110,9 @@ int verifica_frente(Ciclista *c) {
 
     if (debug) {
         if (id_na_frente == -1) {
-            printf("\t 🟢 Frente livre para o ciclista %d\n", c->id);
+            //printf("\t 🟢 Frente livre para o ciclista %d\n", c->id);
         } else {
-            printf("\t 🔴 Frente ocupada para o ciclista %d por ciclista %d\n", c->id, id_na_frente);
+            //printf("\t 🔴 Frente ocupada para o ciclista %d por ciclista %d\n", c->id, id_na_frente);
         }
     }
 
@@ -123,6 +124,20 @@ void verifica_volta_completada(Ciclista *c, int col_antiga, int col_nova) {
         c->voltas_completadas++;
         if (debug) {
             printf("🔁 Ciclista %d completou %d volta(s)\n",
+                   c->id, c->voltas_completadas);
+        }
+    }
+}
+
+void verifica_quebra(Ciclista *c) {
+    if (c->voltas_completadas > 0 && c->voltas_completadas % 5 == 0) {
+        int sorteio = rand() % 100; // 0 a 99
+        if (sorteio < 10) { // 10% de chance
+            c->quebrado = 1;
+            printf("💥 Ciclista %d QUEBROU na volta %d!\n",
+                   c->id, c->voltas_completadas);
+        } else if (debug) {
+            printf("✅ Ciclista %d sobreviveu à verificação de quebra na volta %d\n",
                    c->id, c->voltas_completadas);
         }
     }
@@ -176,6 +191,8 @@ int tenta_mover_para_frente(Ciclista *c) {
             int col_antiga = c->coluna_pista;
             c->coluna_pista = col_prox;
             verifica_volta_completada(c, col_antiga, col_prox);
+            verifica_quebra(c);
+
             c->ticks_para_mover = (c->velocidade == 30) ? 2 : 1;
 
             if (debug) {
@@ -204,7 +221,7 @@ void *logica_ciclista(void *arg) {
     Ciclista *c = (Ciclista *)arg;
     int id = c->id - 1;
 
-    for (int tick = 0; tick < 10; tick++) {
+    for (int tick = 0; tick < MAX_TICKS; tick++) {
         //printf("🟡 Ciclista %d pronto para o tick %d\n", c->id, tick);
 
         pthread_mutex_lock(&tick_mutexes[id]);
@@ -215,7 +232,7 @@ void *logica_ciclista(void *arg) {
         continue_flag[id] = 0;
         pthread_mutex_unlock(&tick_mutexes[id]);
 
-        printf("🚴 Ciclista %d executando tick %d\n", c->id, tick);
+        //printf("🚴 Ciclista %d executando tick %d\n", c->id, tick);
 
         if (c->ticks_para_mover > 0) {
             c->ticks_para_mover--;
@@ -312,7 +329,7 @@ void *coordenador_tick(void *arg) {
     }
 
     // Loop de ticks
-    for (int tick = 0; tick < 10; tick++) {
+    for (int tick = 0; tick < MAX_TICKS; tick++) {
         //printf("\n⏱️ Coordenador aguardando tick %d...\n", tick);
 
         // Espera todos os ciclistas chegarem no tick
@@ -326,7 +343,7 @@ void *coordenador_tick(void *arg) {
         }
 
         // Todos os ciclistas chegaram
-        printf("🟢 Tick %d finalizado. Liberando próximo tick...\n", tick + 1);
+        //printf("🟢 Tick %d finalizado. Liberando próximo tick...\n", tick + 1);
 
         // Libera todos os ciclistas para o próximo tick
         for (int i = 0; i < k; i++) {
