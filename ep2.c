@@ -24,6 +24,10 @@ int *continue_flag;
 pthread_mutex_t *tick_mutexes;
 pthread_cond_t *tick_conds;
 
+int rodada_voltas = 2;
+int ultimo_ciclista_id = -1;
+pthread_mutex_t mutex_ultimo;
+
 void inicializa_pista()
 {
     pista = malloc(sizeof(int *) * N_FAIXAS);
@@ -92,6 +96,33 @@ void inicializa_ciclistas()
     }
 }
 
+void verifica_ultimo(Ciclista *c) {
+    pthread_mutex_lock(&mutex_ultimo);
+
+    // Se o ciclista atingiu a rodada atual
+    if (c->voltas_completadas == rodada_voltas) {
+        ultimo_ciclista_id = c->id;
+
+        // Verifica se todos atingiram essa rodada
+        int todos_atingiram = 1;
+        for (int i = 0; i < k; i++) {
+            if (!ciclistas[i].quebrado && !ciclistas[i].eliminado && ciclistas[i].voltas_completadas < rodada_voltas) {
+                todos_atingiram = 0;
+                break;
+            }
+        }
+
+        // Se sim, exibe o último e prepara a próxima rodada
+        if (todos_atingiram) {
+            printf("🚨 Último a completar %d voltas: Ciclista %d\n", rodada_voltas, ultimo_ciclista_id);
+            rodada_voltas += 2;
+            ultimo_ciclista_id = -1;
+        }
+    }
+
+    pthread_mutex_unlock(&mutex_ultimo);
+}
+
 int verifica_frente(Ciclista *c) {
     int linha = c->linha_pista;
     int col_atual = c->coluna_pista;
@@ -122,6 +153,9 @@ int verifica_frente(Ciclista *c) {
 void verifica_volta_completada(Ciclista *c, int col_antiga, int col_nova) {
     if (col_nova == 0 && col_antiga == d - 1) {
         c->voltas_completadas++;
+
+        verifica_ultimo(c);
+
         if (debug) {
             printf("🔁 Ciclista %d completou %d volta(s)\n",
                    c->id, c->voltas_completadas);
@@ -214,6 +248,7 @@ int tenta_mover_para_frente(Ciclista *c) {
 
     return moveu;
 }
+
 
 
 
@@ -427,6 +462,7 @@ int main(int argc, char *argv[]) {
 
     inicializa_pista();
     inicializa_mutexes();
+    pthread_mutex_init(&mutex_ultimo, NULL);
 
     
     srand(time(NULL));
@@ -457,6 +493,8 @@ int main(int argc, char *argv[]) {
     
 
     free(ciclistas);
+    pthread_mutex_destroy(&mutex_ultimo);
+
     
     return 0;
 }
