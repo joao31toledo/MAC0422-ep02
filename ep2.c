@@ -3,7 +3,7 @@
 #include <string.h>
 #include <time.h>
 #include <pthread.h>
-
+#include <unistd.h> 
 #include "ep2.h"
 
 // Variáveis globais
@@ -28,6 +28,10 @@ int rodada_voltas = 2;
 int ultimo_ciclista_id = -1;
 pthread_mutex_t mutex_ultimo;
 
+int ciclistas_ativos = 0; // total de ciclistas vivos (não quebrados nem eliminados)
+int ciclistas_completaram_rodada = 0;
+pthread_mutex_t mutex_contagem;
+
 void inicializa_pista()
 {
     pista = malloc(sizeof(int *) * N_FAIXAS);
@@ -42,7 +46,8 @@ void inicializa_pista()
     }
 }
 
-void inicializa_mutexes() {
+void inicializa_mutexes()
+{
     if (modo == 'i') {
         if (pthread_mutex_init(&pista_mutex, NULL) != 0) {
             perror("Erro ao inicializar mutex global");
@@ -75,7 +80,6 @@ void inicializa_mutexes() {
     }
 }
 
-
 void inicializa_ciclistas()
 {
     ciclistas = malloc(sizeof(Ciclista) * k);
@@ -88,15 +92,49 @@ void inicializa_ciclistas()
         ciclistas[i].voltas_completadas = 0;
         ciclistas[i].quebrado = 0;
         ciclistas[i].eliminado = 0;
+        ciclistas[i].volta_eliminacao = -1;
 
         pthread_mutex_init(&ciclistas[i].mutex, NULL);
         
         // 🎯 Sorteia posição de largada livre na pista
         sorteia_largada(&ciclistas[i]);
     }
+
+    ciclistas_ativos = k; // 🟢 Inicializa o número de ciclistas ativos
+
 }
 
-void verifica_ultimo(Ciclista *c) {
+void remove_ciclista(Ciclista *c, int motivo) {
+    int linha = c->linha_pista;
+    int coluna = c->coluna_pista;
+
+    // Remove da pista
+    if (modo == 'i') {
+        pthread_mutex_lock(&pista_mutex);
+        pista[linha][coluna] = -1;
+        pthread_mutex_unlock(&pista_mutex);
+    } else {
+        pthread_mutex_lock(&controle_pista[linha][coluna]);
+        pista[linha][coluna] = -1;
+        pthread_mutex_unlock(&controle_pista[linha][coluna]);
+    }
+
+    c->eliminado = 1;
+    c->volta_eliminacao = c->voltas_completadas;
+
+    pthread_mutex_lock(&mutex_contagem);
+    ciclistas_ativos--;
+    pthread_mutex_unlock(&mutex_contagem);
+
+    if (motivo == 1) {
+        printf("💀 Ciclista %d foi ELIMINADO na volta %d\n", c->id, c->volta_eliminacao);
+    } else if (motivo == 2) {
+        printf("🛠️ Ciclista %d foi REMOVIDO por quebra na volta %d\n", c->id, c->volta_eliminacao);
+    }
+}
+
+void verifica_ultimo(Ciclista *c)
+{
     pthread_mutex_lock(&mutex_ultimo);
 
     // Se o ciclista atingiu a rodada atual
@@ -115,6 +153,14 @@ void verifica_ultimo(Ciclista *c) {
         // Se sim, exibe o último e prepara a próxima rodada
         if (todos_atingiram) {
             printf("🚨 Último a completar %d voltas: Ciclista %d\n", rodada_voltas, ultimo_ciclista_id);
+            // Elimina o último ciclista (se ainda ativo)
+            for (int i = 0; i < k; i++) {
+                if (ciclistas[i].id == ultimo_ciclista_id && !ciclistas[i].quebrado && !ciclistas[i].eliminado) {
+                    remove_ciclista(&ciclistas[i], 1); // ☠️ Motivo 1 = último
+                    break;
+                }
+            }
+
             rodada_voltas += 2;
             ultimo_ciclista_id = -1;
         }
@@ -123,7 +169,8 @@ void verifica_ultimo(Ciclista *c) {
     pthread_mutex_unlock(&mutex_ultimo);
 }
 
-int verifica_frente(Ciclista *c) {
+int verifica_frente(Ciclista *c)
+{
     int linha = c->linha_pista;
     int col_atual = c->coluna_pista;
     int col_prox = (col_atual + 1) % d;
@@ -154,22 +201,38 @@ void verifica_volta_completada(Ciclista *c, int col_antiga, int col_nova) {
     if (col_nova == 0 && col_antiga == d - 1) {
         c->voltas_completadas++;
 
-        verifica_ultimo(c);
-
         if (debug) {
-            printf("🔁 Ciclista %d completou %d volta(s)\n",
-                   c->id, c->voltas_completadas);
+            printf("🔁 Ciclista %d completou %d volta(s)\n", c->id, c->voltas_completadas);
+        }
+
+        if (c->voltas_completadas == rodada_voltas) {
+            int eliminar = 0;
+
+            pthread_mutex_lock(&mutex_contagem);
+            ciclistas_completaram_rodada++;
+
+            if (ciclistas_completaram_rodada == ciclistas_ativos) {
+                eliminar = 1;
+                ciclistas_completaram_rodada = 0;
+                rodada_voltas += 2;
+            }
+
+            pthread_mutex_unlock(&mutex_contagem);
+
+            if (eliminar) {
+                printf("🚨 Último a completar %d voltas: Ciclista %d\n", c->voltas_completadas, c->id);
+                remove_ciclista(c, 1); // 🔧 ALTERAÇÃO: agora remove corretamente
+            }
         }
     }
 }
 
 void verifica_quebra(Ciclista *c) {
     if (c->voltas_completadas > 0 && c->voltas_completadas % 5 == 0) {
-        int sorteio = rand() % 100; // 0 a 99
-        if (sorteio < 10) { // 10% de chance
+        int sorteio = rand() % 100;
+        if (sorteio < 10) {
             c->quebrado = 1;
-            printf("💥 Ciclista %d QUEBROU na volta %d!\n",
-                   c->id, c->voltas_completadas);
+            remove_ciclista(c, 2); // 🔧 ALTERAÇÃO: agora remove corretamente
         } else if (debug) {
             printf("✅ Ciclista %d sobreviveu à verificação de quebra na volta %d\n",
                    c->id, c->voltas_completadas);
@@ -177,44 +240,15 @@ void verifica_quebra(Ciclista *c) {
     }
 }
 
-
 int tenta_mover_para_frente(Ciclista *c) {
+    if (c->eliminado || c->quebrado) return 0; // 🔧 ALTERAÇÃO: não move se removido
+
     int linha = c->linha_pista;
     int col_atual = c->coluna_pista;
     int col_prox = (col_atual + 1) % d;
     int moveu = 0;
 
-    if (modo == 'i') {
-        pthread_mutex_lock(&pista_mutex);
-
-        if (pista[linha][col_prox] == -1) {
-            // Atualiza pista
-            pista[linha][col_atual] = -1;
-            pista[linha][col_prox] = c->id;
-
-            // Atualiza posição na struct
-            c->coluna_pista = col_prox;
-
-            // Reseta ticks para mover de novo
-            c->ticks_para_mover = (c->velocidade == 30) ? 2 : 1;
-
-            if (debug) {
-                printf("🏃 Ciclista %d andou de [%d][%d] para [%d][%d]\n",
-                       c->id, linha, col_atual, linha, col_prox);
-            }
-
-            moveu = 1;
-        } else {
-            if (debug) {
-                printf("⛔ Ciclista %d bloqueado em [%d][%d], ocupado por %d\n",
-                       c->id, linha, col_prox, pista[linha][col_prox]);
-            }
-        }
-
-        pthread_mutex_unlock(&pista_mutex);
-
-    } else {
-        // Modo eficiente: tranca duas posições
+    if (modo == 'e') {
         pthread_mutex_lock(&controle_pista[linha][col_atual]);
         pthread_mutex_lock(&controle_pista[linha][col_prox]);
 
@@ -224,22 +258,17 @@ int tenta_mover_para_frente(Ciclista *c) {
 
             int col_antiga = c->coluna_pista;
             c->coluna_pista = col_prox;
+
             verifica_volta_completada(c, col_antiga, col_prox);
             verifica_quebra(c);
 
             c->ticks_para_mover = (c->velocidade == 30) ? 2 : 1;
 
             if (debug) {
-                printf("🏃 Ciclista %d andou de [%d][%d] para [%d][%d]\n",
-                       c->id, linha, col_atual, linha, col_prox);
+                printf("🏃 Ciclista %d andou de [%d][%d] para [%d][%d]\n", c->id, linha, col_atual, linha, col_prox);
             }
 
             moveu = 1;
-        } else {
-            if (debug) {
-                printf("⛔ Ciclista %d bloqueado em [%d][%d], ocupado por %d\n",
-                       c->id, linha, col_prox, pista[linha][col_prox]);
-            }
         }
 
         pthread_mutex_unlock(&controle_pista[linha][col_prox]);
@@ -249,43 +278,25 @@ int tenta_mover_para_frente(Ciclista *c) {
     return moveu;
 }
 
-
-
-
 void *logica_ciclista(void *arg) {
     Ciclista *c = (Ciclista *)arg;
     int id = c->id - 1;
 
     for (int tick = 0; tick < MAX_TICKS; tick++) {
-        //printf("🟡 Ciclista %d pronto para o tick %d\n", c->id, tick);
-
         pthread_mutex_lock(&tick_mutexes[id]);
         while (!continue_flag[id]) {
-            //printf("⏸️ Ciclista %d esperando coordenador (tick %d)\n", c->id, tick);
             pthread_cond_wait(&tick_conds[id], &tick_mutexes[id]);
         }
         continue_flag[id] = 0;
         pthread_mutex_unlock(&tick_mutexes[id]);
 
-        //printf("🚴 Ciclista %d executando tick %d\n", c->id, tick);
+        if (c->eliminado || c->quebrado) break; // 🔧 ALTERAÇÃO: sai do loop
 
         if (c->ticks_para_mover > 0) {
             c->ticks_para_mover--;
-            if (debug) {
-                //printf("\t⏳ Ciclista %d aguardando, ticks restantes: %d\n", c->id, c->ticks_para_mover);
-            }
         } else {
-            if (debug) {
-                //printf("\t✅ Ciclista %d pode mover nesse tick\n", c->id);
-                verifica_frente(c);
-                tenta_mover_para_frente(c);            
-                // Recarrega tempo para o próximo movimento
-                c->ticks_para_mover = (c->velocidade == 30) ? 2 : 1;
-            }
-
+            tenta_mover_para_frente(c);
         }
-        
-
 
         pthread_mutex_lock(&tick_mutexes[id]);
         arrive[id] = 1;
@@ -297,14 +308,16 @@ void *logica_ciclista(void *arg) {
     pthread_exit(NULL);
 }
 
-void inicializa_threads_ciclistas() {
+void inicializa_threads_ciclistas()
+{
     // cria uma thread para cada um dos ciclistas
     for (int i = 0; i < k; i++) {
         pthread_create(&ciclistas[i].thread, NULL, logica_ciclista, &ciclistas[i]);
     }
 }
 
-void aguarda_threads_ciclistas() {
+void aguarda_threads_ciclistas()
+{
     for (int i = 0; i < k; i++) {
         pthread_join(ciclistas[i].thread, NULL);
     }
@@ -340,7 +353,8 @@ void sorteia_largada(Ciclista *c)
     c->coluna_pista = col;
 }
 
-void inicializa_sincronizacao() {
+void inicializa_sincronizacao()
+{
     arrive = malloc(sizeof(int) * k);
     continue_flag = malloc(sizeof(int) * k);
     tick_mutexes = malloc(sizeof(pthread_mutex_t) * k);
@@ -355,7 +369,6 @@ void inicializa_sincronizacao() {
 }
 
 void *coordenador_tick(void *arg) {
-    // 🔓 Libera o primeiro tick antes de esperar qualquer coisa
     for (int i = 0; i < k; i++) {
         pthread_mutex_lock(&tick_mutexes[i]);
         continue_flag[i] = 1;
@@ -363,25 +376,31 @@ void *coordenador_tick(void *arg) {
         pthread_mutex_unlock(&tick_mutexes[i]);
     }
 
-    // Loop de ticks
     for (int tick = 0; tick < MAX_TICKS; tick++) {
-        //printf("\n⏱️ Coordenador aguardando tick %d...\n", tick);
+        int aguardados = 0;
 
-        // Espera todos os ciclistas chegarem no tick
-        for (int i = 0; i < k; i++) {
-            pthread_mutex_lock(&tick_mutexes[i]);
-            while (!arrive[i]) {
-                pthread_cond_wait(&tick_conds[i], &tick_mutexes[i]);
+        pthread_mutex_lock(&mutex_contagem);
+        aguardados = ciclistas_ativos; // 🔧 ALTERAÇÃO: sincroniza só com os vivos
+        pthread_mutex_unlock(&mutex_contagem);
+
+        int concluidos = 0;
+        while (concluidos < aguardados) {
+            for (int i = 0; i < k; i++) {
+                if (ciclistas[i].eliminado || ciclistas[i].quebrado) continue;
+
+                pthread_mutex_lock(&tick_mutexes[i]);
+                if (arrive[i]) {
+                    arrive[i] = 0;
+                    concluidos++;
+                }
+                pthread_mutex_unlock(&tick_mutexes[i]);
             }
-            arrive[i] = 0; // limpa para o próximo tick
-            pthread_mutex_unlock(&tick_mutexes[i]);
+            usleep(100); // 🔧 evita busy-wait agressivo
         }
 
-        // Todos os ciclistas chegaram
-        //printf("🟢 Tick %d finalizado. Liberando próximo tick...\n", tick + 1);
-
-        // Libera todos os ciclistas para o próximo tick
         for (int i = 0; i < k; i++) {
+            if (ciclistas[i].eliminado || ciclistas[i].quebrado) continue;
+
             pthread_mutex_lock(&tick_mutexes[i]);
             continue_flag[i] = 1;
             pthread_cond_signal(&tick_conds[i]);
@@ -392,10 +411,8 @@ void *coordenador_tick(void *arg) {
     pthread_exit(NULL);
 }
 
-
-
-
-void libera_pista() {
+void libera_pista()
+{
     if (pista) {
         for (int i = 0; i < N_FAIXAS; i++) {
             free(pista[i]);
@@ -405,7 +422,8 @@ void libera_pista() {
     }
 }
 
-void libera_mutexes() {
+void libera_mutexes()
+{
     if (modo == 'i') {
         pthread_mutex_destroy(&pista_mutex);
     } else if (modo == 'e' && controle_pista) {
@@ -421,7 +439,8 @@ void libera_mutexes() {
 }
 
 
-void imprime_pista() {
+void imprime_pista()
+{
     fprintf(stderr, "\nEstado atual da pista (faixa x posição):\n");
 
     if (modo == 'i') {
@@ -450,7 +469,8 @@ void imprime_pista() {
 
 
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
 
     d = atoi(argv[1]); // tamanho da pista
     k = atoi(argv[2]); // quantidade de ciclistas
@@ -463,6 +483,7 @@ int main(int argc, char *argv[]) {
     inicializa_pista();
     inicializa_mutexes();
     pthread_mutex_init(&mutex_ultimo, NULL);
+    pthread_mutex_init(&mutex_contagem, NULL);
 
     
     srand(time(NULL));
@@ -494,6 +515,7 @@ int main(int argc, char *argv[]) {
 
     free(ciclistas);
     pthread_mutex_destroy(&mutex_ultimo);
+    pthread_mutex_destroy(&mutex_contagem);
 
     
     return 0;
