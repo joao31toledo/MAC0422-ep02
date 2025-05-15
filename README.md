@@ -28,6 +28,7 @@
 #### 4 - criar um relógio global
 
 #### 5 - controlar o movimento dos ciclistas
+!!!!!!!!! antes de remover o último, por exemplo, faz pra remover por ordem de ID, só pra remover mesmo, pra verificar a lógica de remoção!!!!!!!!!!!!!!!!!
 
 #### 6- como coordenar os eventos?
 
