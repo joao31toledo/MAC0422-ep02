@@ -301,6 +301,9 @@ void *logica_ciclista(void *arg) {
 
     pthread_mutex_lock(&barreira_mutex);
     ciclistas_ativos--;
+
+
+    
     
     // Caso ele era o último esperado, desbloqueia a barreira
     if (barreira == ciclistas_ativos) {
