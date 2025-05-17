@@ -39,7 +39,11 @@ typedef struct {
     int voltas_completadas; // contador de voltas que o ciclista completou
     int quebrado; // se ele quebrou ou nao
     int eliminado; // se ele foi eliminado ou nao
+    int ja_contabilizado_na_rodada; // se ele ja foi contabilizado como ciclista terminando a volta
 
+    
+    int terminou; // ✅ NOVO CAMPO
+    
     pthread_t thread; // thread que controla a logica do ciclista
     pthread_mutex_t mutex; // controla quem tem acesso aos valores da struct
 } Ciclista;
